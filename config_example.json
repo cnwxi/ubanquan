@@ -1,0 +1,10 @@
+{
+  "user": "账户",
+  "password": "密码",
+  "payPassword": "支付密码",
+  "push": false,
+  "corpid": "",
+  "agentid": "",
+  "corpsecret": "",
+  "touser": ""
+}
