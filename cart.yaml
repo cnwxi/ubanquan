@@ -1,7 +1,8 @@
 1:
-  name: 二郎神
+  name: 金箍棒
   price: 200
 2:
-  name: 西游记
-  price: 400
+  name:
+  price: 150
 # 注意冒号后面的空格
+# name设空值表示不设置搜索关键词，即搜索全部

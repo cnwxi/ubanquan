@@ -8,5 +8,6 @@
   "corpsecret": "企业微信应用推送参数 应用密钥",
   "touser": "@all",
   "page": 1,
-  "num": 6
+  "num": 6,
+  "process": 10
 }

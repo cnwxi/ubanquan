@@ -1,33 +1,33 @@
 import hashlib
 import json
-import random
-from time import sleep, perf_counter
-from urllib.parse import quote
-import requests
-import threading
-import yaml
+import multiprocessing
 import os
 import time
+from time import perf_counter
+from urllib.parse import quote
+
+import requests
+import yaml
 
 
-def loadYaml():
+def load():
+    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), './config.json'), 'r',
+              encoding='utf-8') as f:
+        config = json.loads(f.read())
+
     with open(
             os.path.join(os.path.dirname(os.path.realpath(__file__)), './cart.yaml'), 'r', encoding='utf-8')as f:
-        cfg = yaml.safe_load(f.read())
-    print(cfg)
-    for i in cfg:
-        print(cfg[i])
+        cart = yaml.safe_load(f.read())
+    return config, cart
 
 
-class ubanquan:
-    def __init__(self):
-        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), './config.json'), 'r',
-                  encoding='utf-8') as f:
-            self.config = json.loads(f.read())
-
-        with open(
-                os.path.join(os.path.dirname(os.path.realpath(__file__)), './cart.yaml'), 'r', encoding='utf-8')as f:
-            self.cart = yaml.safe_load(f.read())
+class uBanQuan(multiprocessing.Process):
+    def __init__(self, config, cart):
+        super().__init__()
+        multiprocessing.Process.__init__(self)
+        self.config = config
+        self.cart = cart
+        # self.count = 0
 
     # 定义请求头
     def setHeaders(self):
@@ -69,8 +69,10 @@ class ubanquan:
         cookies = 'token=' + token
         self.config['cookies'] = cookies
         self.config['token'] = token
+        print(cookies)
         # with open("./config.json", "w", encoding="utf-8") as f:
         #     json.dump(config, f)
+        return ret
 
     # 获取发现页的全部在售商品
     def getList(self, name):
@@ -94,7 +96,6 @@ class ubanquan:
         # headers['token'] = config['token']
         url = "https://h5.ubanquan.cn/api/opactivity/discoverView/v2/pageAuctionProducts"
         page = 1
-        fails = 0
         # 遍历所有页的商品
         items = []
         while True:
@@ -106,18 +107,14 @@ class ubanquan:
                 # for one in itemsList:
                 #     items.append(f'{one.get("name")}:\t\t￥{one.get("nowBid") / 100.0}\n')
                 # print(one.get('name'), '价格', one.get('nowBid') / 100.0)
-                print(f'获取商品成功 {page}/{totalPages}')
+                # print(f'获取商品成功 {page}/{totalPages}')
                 page += 1
-                if page > self.config.get('page'):
+                if page > self.config.get('page') or page > totalPages:
                     # with open("./current.txt", "w", encoding="utf-8") as f:
                     #     f.writelines(items)
                     return items
-            else:
-                print(f'获取商品失败')
-                fails += 1
-                if fails >= 50:
-                    break
-                sleep(2)
+            # else:
+            # print(f'获取商品失败')
 
     def getItemInfo(self, auctionNo):
         url = f'https://ubanquan.cn/api/opactivity/discoverView/getAuctionDetailApp/{auctionNo}'
@@ -150,36 +147,6 @@ class ubanquan:
         print(ret)
         return ret
 
-    def task(self, one):
-        msg = []
-        name = one['name']
-        myPrice = one['price']
-        list = self.getList(name)
-        for i in list[:self.config.get('num')]:
-            price = i['nowBid'] / 100.0
-            if price > myPrice:
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {name} ￥{price} 价格不够美丽")
-            else:
-                itemInfo = self.getItemInfo(i.get('auctionNo'))
-                if itemInfo is not None:
-                    id, name, price = itemInfo.get('auctionInfo', {}).get('serialNum'), itemInfo.get(
-                        'name'), itemInfo.get(
-                        'nowBid') / 100.0
-                    if price == 0 or price <= myPrice:
-                        ret = self.justBuyIt(itemInfo)
-                        if ret.get('success'):
-                            tmpmsg = "买到了"
-                        else:
-                            tmpmsg = f"没抢到，errorMsg：{ret.get('errorMsg')}"
-                        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {tmpmsg}")
-                        msg.append({"name": f"{name}", "value": f"￥{price} {tmpmsg}"})
-                    else:
-                        print(f"time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())) {name} ￥{price} 价格不够美丽")
-
-        if msg and self.config.get('push'):
-            msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
-            self.send(msg)
-
     def send(self, content):
         print("企业微信应用消息推送开始")
         qywx_corpid = self.config.get('corpid')
@@ -204,22 +171,59 @@ class ubanquan:
                       data=json.dumps(data))
         return
 
+    def task(self):
+        # self.count += 1
+        msg = []
+        name = self.cart['name']
+        myPrice = self.cart['price']
+        list = self.getList(name)
+        for i in list[:self.config.get('num')]:
+            name = i['name']
+            price = i['nowBid'] / 100.0
+            if price > myPrice:
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {name} ￥{price} 价格不够美丽")
+            else:
+                itemInfo = self.getItemInfo(i.get('auctionNo'))
+                if itemInfo is not None:
+                    id, name, price = itemInfo.get('auctionInfo', {}).get('serialNum'), itemInfo.get(
+                        'name'), itemInfo.get(
+                        'nowBid') / 100.0
+                    if price == 0 or price <= myPrice:
+                        ret = self.justBuyIt(itemInfo)
+                        if ret.get('success'):
+                            tmpmsg = "买到了"
+                        else:
+                            tmpmsg = f"没抢到，errorMsg：{ret.get('errorMsg')}"
+                        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {tmpmsg}")
+                        msg.append({"name": f"{name}", "value": f"￥{price} {tmpmsg}"})
+                    else:
+                        print(
+                            f"time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())) {name} ￥{price} 价格不够美丽")
+
+        if msg and self.config.get('push'):
+            msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
+            self.send(msg)
+
     def run(self):
         self.login()
         t1 = perf_counter()
+        # threads = [threading.Thread(target=self.task, args=(self.cart[i],))
+        #            for i in self.cart]
+        # [thread.setDaemon(True) for thread in threads]
+        # [thread.start() for thread in threads]
         while True:
+            self.task()
             t2 = perf_counter()
-            # self.task()
-            threads = [threading.Thread(target=self.task(self.cart[i])) for i in self.cart]
-            [thread.setDaemon(True) for thread in threads]
-            [thread.start() for thread in threads]
-            # sleepTime = 0.05 + random.randint(0, 2) * 0.05
-            # sleep(sleepTime)
+            # if t2 - t1 > 1:
+            #     print(self.count)
+            #     break
             if t2 - t1 > 1800:
-                self.login()
                 t1 = t2
+                self.login()
 
 
 if __name__ == "__main__":
-    ubanquan = ubanquan()
-    ubanquan.run()
+    config, cart = load()
+    for i in range(config.get('process')):
+        pList = [uBanQuan(config=config, cart=cart[i]) for i in cart]
+        [p.start() for p in pList]
