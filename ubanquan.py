@@ -4,15 +4,30 @@ import random
 from time import sleep, perf_counter
 from urllib.parse import quote
 import requests
-import cart
 import threading
+import yaml
+import os
+import time
+
+
+def loadYaml():
+    with open(
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), './cart.yaml'), 'r', encoding='utf-8')as f:
+        cfg = yaml.safe_load(f.read())
+    print(cfg)
+    for i in cfg:
+        print(cfg[i])
 
 
 class ubanquan:
     def __init__(self):
-        with open("./config.json", "r",
-                  encoding="utf-8") as f:
+        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), './config.json'), 'r',
+                  encoding='utf-8') as f:
             self.config = json.loads(f.read())
+
+        with open(
+                os.path.join(os.path.dirname(os.path.realpath(__file__)), './cart.yaml'), 'r', encoding='utf-8')as f:
+            self.cart = yaml.safe_load(f.read())
 
     # 定义请求头
     def setHeaders(self):
@@ -93,7 +108,7 @@ class ubanquan:
                 # print(one.get('name'), '价格', one.get('nowBid') / 100.0)
                 print(f'获取商品成功 {page}/{totalPages}')
                 page += 1
-                if page > 1:
+                if page > self.config.get('page'):
                     # with open("./current.txt", "w", encoding="utf-8") as f:
                     #     f.writelines(items)
                     return items
@@ -137,31 +152,33 @@ class ubanquan:
 
     def task(self, one):
         msg = []
-        name = one[0]
-        myPrice = one[1]
+        name = one['name']
+        myPrice = one['price']
         list = self.getList(name)
-        for i in list[:5]:
-            itemInfo = self.getItemInfo(i.get('auctionNo'))
-            if itemInfo is not None:
-                id, name, price = itemInfo.get('auctionInfo', {}).get('serialNum'), itemInfo.get(
-                    'name'), itemInfo.get(
-                    'nowBid') / 100.0
-                if price == 0 or price <= myPrice:
-                    ret = self.justBuyIt(itemInfo)
-                    if ret.get('success'):
-                        tmpmsg = "买到了"
+        for i in list[:self.config.get('num')]:
+            price = i['nowBid'] / 100.0
+            if price > myPrice:
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {name} ￥{price} 价格不够美丽")
+            else:
+                itemInfo = self.getItemInfo(i.get('auctionNo'))
+                if itemInfo is not None:
+                    id, name, price = itemInfo.get('auctionInfo', {}).get('serialNum'), itemInfo.get(
+                        'name'), itemInfo.get(
+                        'nowBid') / 100.0
+                    if price == 0 or price <= myPrice:
+                        ret = self.justBuyIt(itemInfo)
+                        if ret.get('success'):
+                            tmpmsg = "买到了"
+                        else:
+                            tmpmsg = f"没抢到，errorMsg：{ret.get('errorMsg')}"
+                        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {tmpmsg}")
+                        msg.append({"name": f"{name}", "value": f"￥{price} {tmpmsg}"})
                     else:
-                        tmpmsg = "没抢到"
-                    print(tmpmsg)
-                    msg.append({"name": f"{name}", "value": f"￥{price} {tmpmsg}"})
-                else:
-                    # msg.append({"name": f"{name}", "value": f"￥{price} 价格不够美丽"})
-                    print(f"{name} ￥{price} 价格不够美丽")
+                        print(f"time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())) {name} ￥{price} 价格不够美丽")
 
         if msg and self.config.get('push'):
             msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
             self.send(msg)
-
 
     def send(self, content):
         print("企业微信应用消息推送开始")
@@ -187,14 +204,13 @@ class ubanquan:
                       data=json.dumps(data))
         return
 
-
     def run(self):
         self.login()
         t1 = perf_counter()
         while True:
             t2 = perf_counter()
             # self.task()
-            threads = [threading.Thread(target=self.task(one)) for one in cart.myList]
+            threads = [threading.Thread(target=self.task(self.cart[i])) for i in self.cart]
             [thread.setDaemon(True) for thread in threads]
             [thread.start() for thread in threads]
             # sleepTime = 0.05 + random.randint(0, 2) * 0.05

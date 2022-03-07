@@ -3,8 +3,10 @@
   "password": "密码",
   "payPassword": "支付密码",
   "push": false,
-  "corpid": "",
-  "agentid": "",
-  "corpsecret": "",
-  "touser": ""
+  "corpid": "企业微信应用推送参数 企业ID",
+  "agentid": "企业微信应用推送参数 应用ID",
+  "corpsecret": "企业微信应用推送参数 应用密钥",
+  "touser": "@all",
+  "page": 1,
+  "num": 6
 }
