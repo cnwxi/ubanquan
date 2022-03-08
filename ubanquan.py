@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*
 import hashlib
 import json
 import multiprocessing
@@ -10,15 +11,21 @@ from urllib.parse import quote
 from ctypes import c_wchar_p
 import requests
 import yaml
+import sys
 
 
 def load():
-    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), './config.json'), 'r',
+    if getattr(sys, 'frozen', False):
+        path = os.path.dirname(sys.executable)
+    elif __file__:
+        path = os.path.dirname(__file__)
+
+    with open(os.path.join(path, 'config.json'), 'r',
               encoding='utf-8') as f:
         config = json.loads(f.read())
 
     with open(
-            os.path.join(os.path.dirname(os.path.realpath(__file__)), './cart.yaml'), 'r', encoding='utf-8')as f:
+            os.path.join(path, 'cart.yaml'), 'r', encoding='utf-8')as f:
         cart = yaml.safe_load(f.read())
     return config, cart
 
@@ -56,7 +63,7 @@ class uBanQuan():
         self.config = config
         self.cart = cart
         self.pid = pid
-        print(f'{self.pid} 刷单进程初始化')
+        print(f' {self.pid}\t刷单进程初始化')
 
     # 获取发现页的全部在售商品
     def getList(self, name):
@@ -110,7 +117,9 @@ class uBanQuan():
             # print(f"当前价格\t{itemInfo.get('nowBid') / 100.0}\t加价幅度\t{itemInfo.get('accumulatePrice') / 100.0}")
             return itemInfo
         else:
-            print(f"获取商品 {auctionNo} 失败")
+            # print(ret)
+            print(
+                f" {self.pid}\t{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} 获取商品 {auctionNo} 失败 errorMsg：{ret.get('errorMsg')}")
             return None
 
     def justBuyIt(self, itemInfo, token):
@@ -155,36 +164,42 @@ class uBanQuan():
                       data=json.dumps(data))
         return
 
-    def run(self, token):
+    def run(self, token, lock):
+        name = self.cart['name']
+        myPrice = self.cart['price']
         # self.count += 1
+
         while True:
             msg = []
-            name = self.cart['name']
-            myPrice = self.cart['price']
+
             list = self.getList(name)
+
             for i in list[:self.config.get('num')]:
-                name = i['name']
-                price = i['nowBid'] / 100.0
-                if price > myPrice:
-                    print(f"{self.pid} {datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')} {name} ￥{price} 价格不够美丽")
-                else:
-                    itemInfo = self.getItemInfo(i.get('auctionNo'))
-                    if itemInfo is not None:
-                        id, name, price = itemInfo.get('auctionInfo', {}).get('serialNum'), itemInfo.get(
-                            'name'), itemInfo.get(
-                            'nowBid') / 100.0
-                        if price == 0 or price <= myPrice:
-                            ret = self.justBuyIt(itemInfo=itemInfo, token=token)
-                            if ret.get('success'):
-                                tmpmsg = "买到了"
-                            else:
-                                tmpmsg = f"没抢到，errorMsg：{ret.get('errorMsg')}"
-                            print(
-                                f"{self.pid} {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} {tmpmsg}")
-                            msg.append({"name": f"{name}", "value": f"￥{price} {tmpmsg}"})
+                # name = i['name']
+                # price = i['nowBid'] / 100.0
+                # if price > myPrice:
+                #     print(f" {self.pid}\t{datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')} ￥{price} 价格不够美丽 {name}")
+                # else:
+                itemInfo = self.getItemInfo(i.get('auctionNo'))
+
+                if itemInfo is not None:
+                    id, name, price = itemInfo.get('auctionInfo', {}).get('serialNum'), itemInfo.get(
+                        'name'), itemInfo.get(
+                        'nowBid') / 100.0
+                    if price == 0 or price <= myPrice:
+                        lock.acquire()
+                        ret = self.justBuyIt(itemInfo=itemInfo, token=token)
+                        if ret.get('success'):
+                            tmpmsg = "买到了"
                         else:
-                            print(
-                                f"{self.pid} {datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')} {name} ￥{price} 价格不够美丽")
+                            tmpmsg = f"没抢到，errorMsg：{ret.get('errorMsg')}"
+                        print(
+                            f" {self.pid}\t{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} ￥{price} {name} {tmpmsg}")
+                        msg.append({"name": f"{name}", "value": f"￥{price} {name} {tmpmsg}"})
+                        lock.release()
+                    else:
+                        print(
+                            f" {self.pid}\t{datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')} ￥{price} 价格不够美丽 {name}")
 
             if msg and self.config.get('push'):
                 msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
@@ -196,7 +211,7 @@ class init():
         multiprocessing.Process.__init__(self)
         self.config = config
         self.pid = pid
-        print(f'{self.pid} 登录进程初始化')
+        print(f' {self.pid}\t登录进程初始化')
 
     # 登录获取cookie
     def login(self, token):
@@ -208,7 +223,7 @@ class init():
         }
         url = 'https://ubanquan.cn/api/opuser/loginPassword'
         ret = requests.post(url=url, data=json.dumps(data), headers=setHeaders()).json()
-        # print(ret)
+        print(f"登录结果：{ret.get('success')}, errorMsg：{ret.get('errorMsg')}")
         token.value = ret.get('data', {}).get('token')
         # cookies = 'token=' + token.value
         # print(cookies)
@@ -219,37 +234,51 @@ class init():
     def run(self, token):
         ret = self.login(token)
         if ret.get('success'):
-            print(f"{self.pid} {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} 登录成功")
+            print(f" {self.pid}\t{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} 登录成功")
             token.value = ret.get('data', {}).get('token')
             t1 = perf_counter()
             while True:
                 t2 = perf_counter()
                 # 超时重登 单位 秒/s
-                if t2 - t1 > 5:
+                if t2 - t1 > 1800:
                     t1 = t2
                     ret = self.login(token)
                     if ret.get('success'):
                         token.value = ret.get('data', {}).get('token')
                         print(
-                            f"{self.pid} {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} 重新登录刷新token")
+                            f" {self.pid}\t{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} 重新登录刷新token")
                     else:
                         quit()
 
 
 if __name__ == "__main__":
-    config, cart = load()
-    token = Manager().Value(c_wchar_p, '')
-    p0 = multiprocessing.Process(target=init(config=config, pid=0).run, args=(token,))
 
+    multiprocessing.freeze_support()
+    config, cart = load()
+    print('———扫货列表')
+    print(f'\t关键词\t\t价格')
+    for i in cart:
+        print(f'\t{cart[i]["name"]}\t\t{cart[i]["price"]}')
+    if config.get('push'):
+        print('———推送已开启')
+    else:
+        print('———推送未开启')
+    print('———按下任意键后开始扫货')
+    os.system("pause")
+    token = Manager().Value(c_wchar_p, '')
+    lock = Manager().Lock()
+    p0 = multiprocessing.Process(target=init(config=config, pid=0).run, args=(token,), daemon=True)
+    p0.start()
     plist = []
     process = config.get('process')
     pid = 1
     for i in range(process):
         for j in cart:
             plist.append(
-                multiprocessing.Process(target=uBanQuan(config=config, cart=cart[j], pid=pid).run, args=(token,)))
+                multiprocessing.Process(target=uBanQuan(config=config, cart=cart[j], pid=pid).run, args=(token, lock,),
+                                        daemon=True))
             pid += 1
-    p0.start()
+
     [p.start() for p in plist]
     p0.join()
     [p.join() for p in plist]
